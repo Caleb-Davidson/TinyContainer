@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
 using Scene = UnityEngine.SceneManagement.Scene;
@@ -25,7 +26,7 @@ namespace Jnk.TinyContainer
                 if (_global != null)
                     return _global;
 
-                if (FindObjectOfType<TinyContainerGlobal>() is {} global)
+                if (FindAnyObjectByType<TinyContainerGlobal>() is {} global)
                 {
                     global.BootstrapOnDemand();
                     return _global;
@@ -43,7 +44,7 @@ namespace Jnk.TinyContainer
         [SerializeField] private EventFunction enabledEventFunctions = EventFunction.FixedUpdate | EventFunction.Update | EventFunction.LateUpdate;
         [SerializeField] private bool disposeOnDestroy = true;
 
-        private readonly Dictionary<Type, object> _instances = new();
+        private readonly Dictionary<Type, List<object>> _instances = new();
         private readonly Dictionary<Type, Func<TinyContainer, object>> _factories = new();
         private bool _isInitialized;
 
@@ -52,8 +53,6 @@ namespace Jnk.TinyContainer
             get => enabledEventFunctions;
             set => enabledEventFunctions = value;
         }
-
-        public IEnumerable<object> RegisteredInstances => _instances.Values;
 
         internal void ConfigureAsGlobal(bool dontDestroyOnLoad)
         {
@@ -133,8 +132,10 @@ namespace Jnk.TinyContainer
         {
             Type type = typeof(T);
 
-            if (IsNotRegistered(type))
-                _instances[type] = instance;
+            if (!_instances.TryGetValue(type, out var objects)) {
+                _instances[type] = objects = new List<object>();
+            }
+            objects.Add(instance);
 
             return this;
         }
@@ -147,8 +148,10 @@ namespace Jnk.TinyContainer
             if (type.IsInstanceOfType(instance) == false)
                 throw new ArgumentException("Type of instance does not match.", nameof(instance));
 
-            if (IsNotRegistered(type))
-                _instances[type] = instance;
+            if (!_instances.TryGetValue(type, out var objects)) {
+                _instances[type] = objects = new List<object>();
+            }
+            objects.Add(instance);
 
             return this;
         }
@@ -207,6 +210,9 @@ namespace Jnk.TinyContainer
             throw new TypeNotFoundException($"Could not resolve type '{typeof(T).Name}'.");
         }
 
+        /// <summary>
+        /// Returns the first instance for the type upwards in the hierarchy.
+        /// </summary>
         public T Get<T>() where T : class
         {
             Type type = typeof(T);
@@ -227,6 +233,7 @@ namespace Jnk.TinyContainer
         /// <summary>
         /// Returns the first instance for the type upwards in the hierarchy.
         /// </summary>
+        [ContractAnnotation("=> true, instance:notnull; => false, instance:null")]
         public bool TryGet<T>(out T instance) where T : class
         {
             Type type = typeof(T);
@@ -243,10 +250,13 @@ namespace Jnk.TinyContainer
 
         private bool TryGetInstance<T>(Type type, ref T instance) where T : class
         {
-            if (false == _instances.TryGetValue(type, out object obj))
+            if (false == _instances.TryGetValue(type, out List<object> objects))
                 return false;
 
-            instance = (T) obj;
+            if (objects.Count == 0)
+                return false;
+            
+            instance = (T) objects[0];
 
             return true;
         }
@@ -271,6 +281,96 @@ namespace Jnk.TinyContainer
 
             container = transform.parent.IsNull()?.GetComponentInParent<TinyContainer>().IsNull() ?? ForSceneOf(this);
             return true;
+        }
+        
+        /// <summary>
+        /// Returns the list of instances for the type upwards in the hierarchy.
+        /// </summary>
+        public TinyContainer GetAll<T>(out List<T> list) where T : class
+        {
+            Type type = typeof(T);
+            list = null;
+            
+            if (!TryGetAll(type, ref list)) {
+                list = new List<T>();
+            }
+            
+            if (TryGetNextContainerInHierarchy(out TinyContainer nextContainer))
+            {
+                list.AddRange(nextContainer.GetAll<T>());
+                nextContainer.GetAll(out list);
+            }
+
+            return this;
+        }
+        
+        /// <summary>
+        /// Returns the list of instances for the type upwards in the hierarchy.
+        /// </summary>
+        public List<T> GetAll<T>() where T : class
+        {
+            Type type = typeof(T);
+            List<T> list = null;
+
+            if (!TryGetAll(type, ref list)) {
+                list = new List<T>();
+            }
+        
+            if (TryGetNextContainerInHierarchy(out TinyContainer nextContainer))
+                list.AddRange(nextContainer.GetAll<T>());
+
+            return list;
+        }
+        
+        /// <summary>
+        /// Returns the list of instances for the type upwards in the hierarchy.
+        /// </summary>
+        public bool TryGetAll<T>(out List<T> list) where T : class
+        {
+            Type type = typeof(T);
+            list = null;
+            
+            bool found = TryGetAll(type, ref list);
+
+            if (TryGetNextContainerInHierarchy(out TinyContainer nextContainer)) {
+                if (nextContainer.TryGetAll(out List<T> nextList)) {
+                    found = true;
+                    if (list == null) {
+                        list = nextList;
+                    } else {
+                        list.AddRange(nextList);
+                    }
+                }
+            }
+            
+            return found;
+        }
+        
+        private bool TryGetAll<T>(Type type, ref List<T> list) where T : class
+        {
+            if (_instances.TryGetValue(type, out List<object> objects) == false)
+                return false;
+        
+            list = objects.Cast<T>().ToList();
+            return true;
+        }
+        
+        public void Remove<T>() where T : class
+        {
+            Type type = typeof(T);
+            Remove(type);
+        }
+        
+        public void Remove(object instance) 
+        {
+            Type type = instance.GetType();
+            Remove(type);
+        }
+
+        public void Remove(Type type) 
+        {
+            _instances.Remove(type);
+            _factories.Remove(type);
         }
 
         private void FixedUpdate()

@@ -1,5 +1,6 @@
 ﻿using System;
 using UnityEditor;
+using UnityEngine;
 
 namespace Jnk.TinyContainer.Editor
 {
@@ -17,7 +18,7 @@ namespace Jnk.TinyContainer.Editor
         {
             serializedObject.UpdateIfRequiredOrScript();
 
-            bool isOnlyOneInScene = FindObjectsOfType<TinyContainerGlobal>().Length <= 1;
+            bool isOnlyOneInScene = FindObjectsByType<TinyContainerGlobal>(FindObjectsSortMode.None).Length <= 1;
             if (isOnlyOneInScene)
             {
                 EditorGUILayout.HelpBox("This container will be the Root of the container hierarchy.", MessageType.None);

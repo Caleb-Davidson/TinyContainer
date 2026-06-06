@@ -2,7 +2,7 @@
 
 namespace Jnk.TinyContainer
 {
-    [AddComponentMenu("TinyContainer/TinyContainer Global")]
+    [AddComponentMenu("TinyContainer/TinyContainer Global"), DefaultExecutionOrder(-50)]
     public class TinyContainerGlobal : TinyContainerBootstrapperBase
     {
         [SerializeField]
